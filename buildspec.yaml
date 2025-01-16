@@ -3,38 +3,50 @@ version: 0.2
 phases:
   pre_build:
     commands:
-      - echo Cleaning and preparing the build with Gradle...
-      - gradlew.bat clean build # Use the Gradle wrapper for Windows
+      - echo Logging into Docker Hub...
+      - DOCKER_PASSWORD=Docker@123
+      - DOCKER_USERNAME=guptamonika3017@gmail.com
+      - echo "$DOCKER_PASSWORD" | docker login --username "$DOCKER_USERNAME" --password-stdin
       - echo Logging in to Amazon ECR...
-      - aws --version # Verify AWS CLI installation
-      - REPOSITORY_URI=381492308048.dkr.ecr.us-east-1.amazonaws.com/boa-funds-registryy
-      - aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin %REPOSITORY_URI%
-      - for /f "delims=" %%i in ('echo %CODEBUILD_RESOLVED_SOURCE_VERSION% ^| powershell -command {($_ -replace "`n", "") -replace "`r", ""}') do set COMMIT_HASH=%%i
-      - set COMMIT_HASH=%COMMIT_HASH:~0,7%
-      - for /f "tokens=2 delims=:" %%i in ("%CODEBUILD_BUILD_ID%") do set IMAGE_TAG=build-%%i
+      - AWS_REGION=us-east-1
+      - AWS_ACCOUNT_ID=381492308048
+      - echo accountID- $AWS_ACCOUNT_ID
+      - aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 381492308048.dkr.ecr.us-east-1.amazonaws.com
+      - echo Granting execution permissions to Gradle wrapper...
+      - chmod +x ./gradlew
+      - echo Cleaning up previous builds...
+      - ./gradlew clean
+
   build:
     commands:
-      - echo Build started on %date% %time%
+      - echo Building the application with Gradle...
+      - ./gradlew build
       - echo Building the Docker image...
-      - docker build -t %REPOSITORY_URI%:latest .
-      - docker tag %REPOSITORY_URI%:latest %REPOSITORY_URI%:%IMAGE_TAG%
+      - IMAGE_REPO_NAME=boa-funds-registry
+      - IMAGE_TAG=latest
+      - echo img-repo-name $IMAGE_REPO_NAME
+      - echo img-tag $IMAGE_TAG
+      - docker build -t $IMAGE_REPO_NAME:$IMAGE_TAG .
+
   post_build:
     commands:
-      - echo Build completed on %date% %time%
-      - echo Pushing the Docker images...
-      - docker push %REPOSITORY_URI%:latest
-      - docker push %REPOSITORY_URI%:%IMAGE_TAG%
+      - echo Tagging the Docker image...
+      - echo post-build img-repo $IMAGE_REPO_NAME
+      - echo post-build accID $AWS_ACCOUNT_ID and region $AWS_REGION
+      - docker tag $IMAGE_REPO_NAME:$IMAGE_TAG $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$IMAGE_REPO_NAME:$IMAGE_TAG
+      - echo Pushing the Docker image to AWS ECR...
+      - docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$IMAGE_REPO_NAME:$IMAGE_TAG
       - echo Writing image definitions file...
-      - powershell -Command "& { $json = '[{\"name\":\"transaction-service\",\"imageUri\":\"%REPOSITORY_URI%:%IMAGE_TAG%\"}]'; Set-Content -Path imagedefinitions.json -Value $json }"
+      - REPOSITORY_URI=381492308048.dkr.ecr.us-east-1.amazonaws.com/boa-funds-registry
+      - printf '[{"name":"funds-service","imageUri":"%s"}]' $REPOSITORY_URI:$IMAGE_TAG > imagedefinitions.json
       - echo Writing image definitions file...
       - # add your container name
       - DOCKER_CONTAINER_NAME=boa-funds-registry
-      - powershell -Command "& { $json = '[{\"name\":\"%DOCKER_CONTAINER_NAME%\",\"imageUri\":\"%REPOSITORY_URI%:%IMAGE_TAG%\"}]'; Set-Content -Path imagedefinitions.json -Value $json }"
-      - echo %DOCKER_CONTAINER_NAME%
-      - echo Printing imagedefinitions.json...
-      - type imagedefinitions.json
+      - printf '[{"name":"%s","imageUri":"%s"}]' $DOCKER_CONTAINER_NAME $REPOSITORY_URI:$IMAGE_TAG > imagedefinitions.json
+      - echo Build process completed successfully.
 
 artifacts:
   files:
+    - build/libs/*.jar
     - imagedefinitions.json
-    - build\libs\*.jar # Windows path for Gradle's default JAR output
+  discard-paths: yes
